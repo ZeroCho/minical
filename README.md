@@ -14,9 +14,11 @@ MiniCal is a small local booking service built with NestJS and SQLite. Visitors 
 Admins open bookable times from `/admin`:
 
 1. Log in with the admin password.
-2. Pick a date.
+2. Pick a date from the visible admin calendar.
 3. Choose start time, end time, and interval.
 4. Submit `가능 시간 추가`.
+
+Admins can also copy one date's slots to another date from the slots panel. Pick the source date in the admin calendar, enter the target date under `복사할 날짜`, then submit `현재 날짜 슬롯 복사`.
 
 Visitors see a calendar on `/`. Dates with no remaining bookable slots are dimmed and disabled. Clicking an available date loads the remaining times for that date. A slot disappears from the public selector when it is inactive or already has a `pending` or `confirmed` booking.
 
@@ -112,6 +114,14 @@ curl -i -c cookies.txt -X POST http://localhost:3000/admin/login \
 curl -b cookies.txt -X POST http://localhost:3000/admin/availability \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -d "date=2026-06-23&start_time=09:00&end_time=11:00&interval_minutes=30"
+```
+
+Copy one date's slots to another date:
+
+```bash
+curl -b cookies.txt -X POST http://localhost:3000/admin/availability/copy \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "source_date=2026-06-23&target_date=2026-06-24"
 ```
 
 Confirm a booking:

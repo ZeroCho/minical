@@ -86,6 +86,18 @@ export class BookingsController {
     response.redirect(302, `/admin?date=${encodeURIComponent(body.date ?? slot.date)}`);
   }
 
+  @Post("/admin/availability/copy")
+  copyAvailability(@Body() body: Record<string, string>, @Req() request: Request, @Res() response: Response) {
+    requireAdmin(request);
+    const slots = this.bookings.copyAvailability(body.source_date, body.target_date);
+    if (wantsJson(request)) {
+      response.status(201).json({ ok: true, slots });
+      return;
+    }
+
+    response.redirect(302, `/admin?date=${encodeURIComponent(body.target_date ?? "")}`);
+  }
+
   @Get("/api/bookings")
   apiBookings() {
     return this.bookings.all();

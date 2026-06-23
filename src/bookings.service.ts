@@ -130,6 +130,39 @@ export class BookingsService {
     return this.database.prepare("SELECT * FROM availability_slots WHERE id = ?").get(slotId) as AvailabilitySlot;
   }
 
+  copyAvailability(sourceDateInput: unknown, targetDateInput: unknown): AvailabilitySlot[] {
+    const sourceDate = required(String(sourceDateInput ?? ""), "source_date");
+    const targetDate = required(String(targetDateInput ?? ""), "target_date");
+    if (sourceDate === targetDate) {
+      throw new BadRequestException("source_date and target_date must be different");
+    }
+
+    const sourceSlots = this.database
+      .prepare("SELECT * FROM availability_slots WHERE date = ? ORDER BY time ASC")
+      .all(sourceDate) as AvailabilitySlot[];
+
+    if (!sourceSlots.length) {
+      throw new BadRequestException("source_date has no slots to copy");
+    }
+
+    const now = formatNow();
+    const upsert = this.database.prepare(
+      `INSERT INTO availability_slots (date, time, is_active, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(date, time) DO UPDATE SET
+         is_active = excluded.is_active,
+         updated_at = excluded.updated_at`
+    );
+
+    for (const slot of sourceSlots) {
+      upsert.run(targetDate, slot.time, slot.is_active, now, now);
+    }
+
+    return this.database
+      .prepare("SELECT * FROM availability_slots WHERE date = ? ORDER BY time ASC")
+      .all(targetDate) as AvailabilitySlot[];
+  }
+
   findById(id: number): Booking {
     const booking = this.database.prepare("SELECT * FROM bookings WHERE id = ?").get(id) as
       | Booking

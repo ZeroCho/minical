@@ -91,6 +91,12 @@ This confirms booked `pending` slots are hidden from visitors.
 
 `GET /api/availability/month?month=2026-06` was covered by automated tests. It returns only dates that still have at least one bookable slot, which drives the public calendar disabled/enabled states.
 
+`POST /admin/availability/copy` was covered by automated tests and manually checked on the running server. Copying `2026-06-25` slots to `2026-06-26` returned copied slots:
+
+```text
+13:00,13:30
+```
+
 Changed a booking to `confirmed` with the admin cookie. Response included:
 
 ```json
@@ -136,7 +142,7 @@ Second check returned zero reminders, confirming `reminded_at` prevents duplicat
 
 ## Screenshots
 
-Playwright screenshot capture succeeded. The public screenshot shows the visible booking calendar with unavailable dates dimmed and available dates selectable. The admin screenshot was captured with an authenticated storage state and shows the availability management panel.
+Playwright screenshot capture succeeded. The public screenshot shows the visible booking calendar with unavailable dates dimmed and available dates selectable. The admin screenshot was captured with an authenticated storage state and shows the visible admin calendar plus slot-copy panel.
 
 - `screenshots/public_booking.png`
 - `screenshots/admin_bookings.png`

@@ -268,6 +268,52 @@ describe("MiniCal bookings", () => {
     expect(publicSlots.body.slots).toHaveLength(0);
   });
 
+  it("copies one date's availability slots to another date", async () => {
+    await createSlots(app, adminCookie, "2026-06-29", "09:00", "10:30");
+
+    const sourceSlots = await request(app.getHttpServer())
+      .get("/api/admin/availability?date=2026-06-29")
+      .set("Cookie", adminCookie)
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .post("/admin/availability/toggle")
+      .set("Cookie", adminCookie)
+      .type("form")
+      .send({ slot_id: sourceSlots.body.slots[1].id, is_active: "0", date: "2026-06-29" })
+      .expect(302);
+
+    await request(app.getHttpServer())
+      .post("/admin/availability/copy")
+      .set("Cookie", adminCookie)
+      .type("form")
+      .send({ source_date: "2026-06-29", target_date: "2026-06-30" })
+      .expect(302)
+      .expect("Location", "/admin?date=2026-06-30");
+
+    const copied = await request(app.getHttpServer())
+      .get("/api/admin/availability?date=2026-06-30")
+      .set("Cookie", adminCookie)
+      .expect(200);
+
+    expect(copied.body.slots.map((slot: { time: string; is_active: 0 | 1 }) => [slot.time, slot.is_active])).toEqual([
+      ["09:00", 1],
+      ["09:30", 0],
+      ["10:00", 1]
+    ]);
+  });
+
+  it("renders admin date selection as a calendar UI", async () => {
+    const response = await request(app.getHttpServer())
+      .get("/admin?date=2026-06-29")
+      .set("Cookie", adminCookie)
+      .expect(200);
+
+    expect(response.text).toContain("admin-calendar-grid");
+    expect(response.text).toContain("copy-source-date");
+    expect(response.text).toContain("copy-target-date");
+  });
+
   it("requires the admin password before rendering admin pages or mutating admin state", async () => {
     await request(app.getHttpServer())
       .get("/admin")

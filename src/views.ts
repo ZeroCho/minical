@@ -214,7 +214,11 @@ export function renderAdminPage(bookings: Booking[], slots: AvailabilitySlotView
             <h2>가능 시간 열기</h2>
           </div>
           <form method="post" action="/admin/availability" class="booking-form">
-            <label>날짜 <input type="date" name="date" value="${escapeHtml(selectedDate)}" required></label>
+            <input type="hidden" name="date" value="${escapeHtml(selectedDate)}">
+            <div class="admin-calendar-card" aria-label="관리자 날짜 선택 달력">
+              ${renderAdminCalendar(selectedDate)}
+            </div>
+            <p class="slot-help">선택한 날짜: <strong>${escapeHtml(selectedDate)}</strong></p>
             <div class="form-row">
               <label>시작 <input type="time" name="start_time" required></label>
               <label>종료 <input type="time" name="end_time" required></label>
@@ -234,9 +238,12 @@ export function renderAdminPage(bookings: Booking[], slots: AvailabilitySlotView
             <p class="eyebrow">Slots</p>
             <h2>${escapeHtml(selectedDate)} 시간표</h2>
           </div>
-          <form method="get" action="/admin" class="date-filter">
-            <input type="date" name="date" value="${escapeHtml(selectedDate)}" required>
-            <button type="submit">조회</button>
+          <form method="post" action="/admin/availability/copy" class="copy-form">
+            <input type="hidden" id="copy-source-date" name="source_date" value="${escapeHtml(selectedDate)}">
+            <label>복사할 날짜
+              <input type="date" id="copy-target-date" name="target_date" required>
+            </label>
+            <button type="submit">현재 날짜 슬롯 복사</button>
           </form>
           <div class="slot-list">
             ${renderAdminSlots(slots, selectedDate)}
@@ -264,6 +271,38 @@ export function renderAdminPage(bookings: Booking[], slots: AvailabilitySlotView
   );
 }
 
+function renderAdminCalendar(selectedDate: string) {
+  const [year, month, selectedDay] = selectedDate.split("-").map(Number);
+  const first = new Date(year, month - 1, 1);
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const previousMonth = shiftMonth(year, month, -1);
+  const nextMonth = shiftMonth(year, month, 1);
+  const cells: string[] = [];
+
+  for (let index = 0; index < first.getDay(); index += 1) {
+    cells.push(`<span class="calendar-day spacer"></span>`);
+  }
+
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const date = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    cells.push(
+      `<a class="calendar-day admin-day${day === selectedDay ? " selected" : ""}" href="/admin?date=${date}">${day}</a>`
+    );
+  }
+
+  return `<div class="calendar-head">
+      <a class="ghost-button" href="/admin?date=${previousMonth}" aria-label="이전 달">‹</a>
+      <strong>${year}년 ${month}월</strong>
+      <a class="ghost-button" href="/admin?date=${nextMonth}" aria-label="다음 달">›</a>
+    </div>
+    <div class="calendar-weekdays" aria-hidden="true">
+      <span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span>
+    </div>
+    <div class="calendar-grid admin-calendar-grid">
+      ${cells.join("")}
+    </div>`;
+}
+
 function renderAdminSlots(slots: AvailabilitySlotView[], selectedDate: string) {
   if (!slots.length) {
     return `<p class="empty slots-empty">이 날짜에는 아직 열린 시간이 없습니다.</p>`;
@@ -284,6 +323,11 @@ function renderAdminSlots(slots: AvailabilitySlotView[], selectedDate: string) {
       </form>`;
     })
     .join("");
+}
+
+function shiftMonth(year: number, month: number, offset: number) {
+  const shifted = new Date(year, month - 1 + offset, 1);
+  return `${shifted.getFullYear()}-${String(shifted.getMonth() + 1).padStart(2, "0")}-01`;
 }
 
 function page(title: string, body: string) {
@@ -440,6 +484,14 @@ input, textarea, select, button {
   padding: 14px;
   background: #fffdfa;
 }
+.admin-calendar-card {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: #fffdfa;
+}
 .calendar-head {
   display: flex;
   align-items: center;
@@ -449,12 +501,16 @@ input, textarea, select, button {
   font-size: 18px;
 }
 .ghost-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 36px;
   height: 36px;
   padding: 0;
   border: 1px solid var(--line);
   background: white;
   color: var(--ink);
+  text-decoration: none;
 }
 .ghost-button:hover {
   background: rgba(34,116,95,.08);
@@ -488,6 +544,19 @@ input, textarea, select, button {
   cursor: pointer;
 }
 .calendar-day.available:hover, .calendar-day.selected {
+  background: var(--accent);
+  color: white;
+}
+.calendar-day.admin-day {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: white;
+  color: var(--ink);
+  cursor: pointer;
+  text-decoration: none;
+}
+.calendar-day.admin-day:hover, .calendar-day.admin-day.selected {
   background: var(--accent);
   color: white;
 }
@@ -577,13 +646,14 @@ button:hover, .admin-header a:hover, .admin-link:hover {
   padding: 22px;
   box-shadow: 0 18px 54px rgba(23,33,27,.10);
 }
-.date-filter {
+.copy-form {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(180px, 1fr) auto;
+  align-items: end;
   gap: 8px;
   margin-bottom: 14px;
 }
-.date-filter button {
+.copy-form button {
   padding: 10px 12px;
 }
 .slot-list {
