@@ -679,7 +679,7 @@ function escapeHtml(value: string) {
 }
 
 const styles = `
-@import url("https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css");
+@import url("https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css");
 :root {
   --ink: #17211b;
   --muted: #5d6c62;
@@ -700,7 +700,7 @@ body {
     linear-gradient(135deg, rgba(34,116,95,.12), transparent 34%),
     linear-gradient(315deg, rgba(183,107,25,.10), transparent 28%),
     var(--paper);
-  font-family: "Pretendard", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: "Pretendard Variable", "Pretendard", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 input, textarea, select, button {
   font: inherit;
