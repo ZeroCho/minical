@@ -1,6 +1,6 @@
 # MiniCal
 
-MiniCal is a small local booking service built with NestJS and SQLite. Visitors can create bookings from admin-defined available time slots, admins can review and update booking status, and Telegram notifications are mocked as append-only log lines.
+MiniCal is a small booking service built with NestJS and SQLite. Visitors can create bookings from store-defined available time slots, store owners can review and update their own bookings, the platform owner can view all stores from one dashboard, and Telegram notifications are mocked as append-only log lines.
 
 ## Stack
 
@@ -11,7 +11,7 @@ MiniCal is a small local booking service built with NestJS and SQLite. Visitors 
 
 ## Availability Flow
 
-Admins open bookable times from `/admin`:
+Store owners open bookable times from `/<store>/admin`, for example `/matjib/admin`:
 
 1. Log in with the admin password.
 2. Pick a date from the visible admin calendar.
@@ -20,7 +20,17 @@ Admins open bookable times from `/admin`:
 
 Admins can also copy one date's slots to another date from the slots panel. Pick the source date in the admin calendar, enter the target date under `복사할 날짜`, then submit `현재 날짜 슬롯 복사`.
 
-Visitors see a calendar on `/`. Dates with no remaining bookable slots are dimmed and disabled. Clicking an available date loads the remaining times for that date. A slot disappears from the public selector when it is inactive or already has a `pending` or `confirmed` booking.
+Visitors see a service landing page on `/`, then choose a store from `/stores` or use a store-specific booking page such as `/main` or `/matjib`. Dates with no remaining bookable slots are dimmed and disabled. Clicking an available date loads the remaining times for that date. A slot disappears from the public selector when it is inactive or already has a `pending` or `confirmed` booking.
+
+## Multi-Store Flow
+
+New stores sign up from `/signup`. A store id becomes the public booking subpath and owner admin subpath:
+
+- Store id `matjib`
+- Public booking page: `/matjib`
+- Store owner admin page: `/matjib/admin`
+
+The platform owner uses `/admin` for the site-wide dashboard. That dashboard shows store information, reservations, and slots across stores. Existing root API routes such as `/book` and `/api/availability` continue to use the built-in `main` store for backward compatibility; the public booking UI for that store is available at `/main`.
 
 ## Install and Run
 
@@ -32,11 +42,16 @@ npm start
 
 Default URL:
 
-- Public booking page: `http://localhost:3000/`
-- Admin page: `http://localhost:3000/admin`
+- Landing page: `http://localhost:3000/`
+- Store list page: `http://localhost:3000/stores`
+- Built-in main store booking page: `http://localhost:3000/main`
+- Store signup page: `http://localhost:3000/signup`
+- Platform admin dashboard: `http://localhost:3000/admin`
+- Example store booking page: `http://localhost:3000/matjib`
+- Example store owner admin page: `http://localhost:3000/matjib/admin`
 - JSON API: `http://localhost:3000/api/bookings`
 
-Default admin password:
+Default platform admin password:
 
 ```text
 minical-admin
@@ -74,7 +89,7 @@ PORT=3000 npm start
 
 For a persistent process, run it under `systemd`, PM2, or your VPS process manager. Put Nginx or Caddy in front if you want HTTPS and a public domain. Keep `data/` and `logs/` on persistent disk.
 
-Set `ADMIN_PASSWORD` in the service environment before public deployment.
+Set `ADMIN_PASSWORD` in the service environment before public deployment. Store owner passwords are created during `/signup` and currently stored in SQLite for this MVP.
 
 ## Test Curl Commands
 
