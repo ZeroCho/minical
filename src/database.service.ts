@@ -1,6 +1,7 @@
 import { Injectable, OnModuleDestroy } from "@nestjs/common";
 import * as fs from "fs";
 import * as path from "path";
+import { adminPassword, hashPassword } from "./admin-auth";
 
 const BetterSqlite3 = require("better-sqlite3");
 
@@ -60,6 +61,7 @@ export class DatabaseService implements OnModuleDestroy {
     `);
     this.migrateTenantColumns();
     this.seedDefaultStore();
+    this.migrateStorePasswordHashes();
   }
 
   prepare(sql: string) {
@@ -107,13 +109,29 @@ export class DatabaseService implements OnModuleDestroy {
 
   private seedDefaultStore() {
     const now = new Date().toISOString();
+    const password = hashPassword(adminPassword());
     this.db
       .prepare(
         `INSERT INTO stores (id, slug, name, admin_password, created_at, updated_at)
-         VALUES (1, 'main', 'MiniCal', 'minical-admin', ?, ?)
+         VALUES (1, 'main', 'MiniCal', ?, ?, ?)
          ON CONFLICT(id) DO NOTHING`
       )
-      .run(now, now);
+      .run(password, now, now);
+  }
+
+  private migrateStorePasswordHashes() {
+    const stores = this.db.prepare("SELECT id, admin_password FROM stores").all() as Array<{
+      id: number;
+      admin_password: string;
+    }>;
+    const update = this.db.prepare("UPDATE stores SET admin_password = ?, updated_at = ? WHERE id = ?");
+    const now = new Date().toISOString();
+
+    for (const store of stores) {
+      if (!store.admin_password.startsWith("scrypt$")) {
+        update.run(hashPassword(store.admin_password), now, store.id);
+      }
+    }
   }
 
   private tableColumns(table: string) {

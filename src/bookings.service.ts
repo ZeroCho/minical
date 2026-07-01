@@ -11,6 +11,7 @@ import {
   Store,
   StoreSummary
 } from "./booking.types";
+import { hashPassword } from "./admin-auth";
 import { DatabaseService } from "./database.service";
 import { formatNow, MockTelegramLogger } from "./mock-telegram.logger";
 
@@ -45,7 +46,7 @@ export class BookingsService {
       .run(store.id, name, contact, date, time, note, now, now);
 
     const booking = this.findById(Number(result.lastInsertRowid));
-    this.logger.write(`NEW_BOOKING name=${name} contact=${contact} datetime=${date} ${time} store=${store.slug}`);
+    this.logger.write(`NEW_BOOKING booking_id=${booking.id} store=${store.slug} datetime=${date} ${time}`);
     return booking;
   }
 
@@ -116,7 +117,7 @@ export class BookingsService {
     }
 
     const name = required(input.name, "name");
-    const password = required(input.password, "password");
+    const password = hashPassword(required(input.password, "password"));
     const now = formatNow();
     const result = this.database
       .prepare(
@@ -288,6 +289,35 @@ export class BookingsService {
 
     this.logger.write(`STATUS_CHANGED id=${id} status=${status}`);
     return this.findById(id);
+  }
+
+  anonymizeBooking(idInput: unknown, storeSlug = DEFAULT_STORE_SLUG): Booking {
+    const store = this.storeBySlug(storeSlug);
+    const id = Number(idInput);
+    if (!Number.isInteger(id) || id <= 0) {
+      throw new BadRequestException("booking_id is required");
+    }
+
+    const now = formatNow();
+    const result = this.database
+      .prepare(
+        `UPDATE bookings
+         SET name = '삭제된 고객', contact = 'deleted', note = NULL, updated_at = ?
+         WHERE id = ? AND store_id = ?`
+      )
+      .run(now, id, store.id);
+
+    if (result.changes === 0) {
+      throw new NotFoundException(`booking ${id} not found`);
+    }
+
+    this.logger.write(`BOOKING_ANONYMIZED id=${id} store=${store.slug}`);
+    return this.findById(id);
+  }
+
+  health() {
+    this.database.prepare("SELECT 1").get();
+    return { ok: true, service: "minical" };
   }
 
   checkReminders(now = new Date()): Booking[] {

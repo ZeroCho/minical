@@ -4,7 +4,11 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import request from "supertest";
+import { adminPassword } from "../src/admin-auth";
 import { AppModule } from "../src/app.module";
+import { assertSafeEnvironment } from "../src/environment";
+
+const BetterSqlite3 = require("better-sqlite3");
 
 describe("MiniCal bookings", () => {
   let app: INestApplication;
@@ -78,6 +82,7 @@ describe("MiniCal bookings", () => {
 
     const listResponse = await request(app.getHttpServer())
       .get("/api/bookings")
+      .set("Cookie", adminCookie)
       .expect(200);
 
     expect(listResponse.body).toHaveLength(1);
@@ -88,7 +93,9 @@ describe("MiniCal bookings", () => {
     });
 
     const log = fs.readFileSync(path.join(tempRoot, "logs", "telegram_mock.log"), "utf8");
-    expect(log).toContain("NEW_BOOKING name=Kim Hana contact=010-1234-5678 datetime=2026-06-23 16:30");
+    expect(log).toContain("NEW_BOOKING booking_id=1 store=main datetime=2026-06-23 16:30");
+    expect(log).not.toContain("Kim Hana");
+    expect(log).not.toContain("010-1234-5678");
   });
 
   it("accepts form-urlencoded bookings and rejects missing required fields", async () => {
@@ -133,7 +140,10 @@ describe("MiniCal bookings", () => {
       .send({ booking_id: created.body.booking.id, status: "confirmed" })
       .expect(302);
 
-    const listResponse = await request(app.getHttpServer()).get("/api/bookings").expect(200);
+    const listResponse = await request(app.getHttpServer())
+      .get("/api/bookings")
+      .set("Cookie", adminCookie)
+      .expect(200);
     expect(listResponse.body[0].status).toBe("confirmed");
 
     const log = fs.readFileSync(path.join(tempRoot, "logs", "telegram_mock.log"), "utf8");
@@ -278,6 +288,39 @@ describe("MiniCal bookings", () => {
       .expect(200);
 
     expect(publicSlots.body.slots).toHaveLength(0);
+  });
+
+  it("rejects cross-site admin form posts", async () => {
+    await createSlots(app, adminCookie, "2026-06-26", "12:00", "12:30");
+
+    const created = await request(app.getHttpServer())
+      .post("/book")
+      .send({
+        name: "Csrf Target",
+        contact: "csrf@example.test",
+        date: "2026-06-26",
+        time: "12:00"
+      })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post("/admin/status")
+      .set("Cookie", adminCookie)
+      .set("Origin", "https://evil.example")
+      .type("form")
+      .send({ booking_id: created.body.booking.id, status: "confirmed" })
+      .expect(403);
+  });
+
+  it("requires admin auth for the default store bookings API", async () => {
+    await request(app.getHttpServer())
+      .get("/api/bookings")
+      .expect(401);
+
+    await request(app.getHttpServer())
+      .get("/api/bookings")
+      .set("Cookie", adminCookie)
+      .expect(200);
   });
 
   it("copies one date's availability slots to another date", async () => {
@@ -441,6 +484,74 @@ describe("MiniCal bookings", () => {
       });
   });
 
+  it("rate limits repeated failed platform admin logins", async () => {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await request(app.getHttpServer())
+        .post("/admin/login")
+        .type("form")
+        .send({ password: "wrong-password" })
+        .expect(401);
+    }
+
+    await request(app.getHttpServer())
+      .post("/admin/login")
+      .type("form")
+      .send({ password: "wrong-password" })
+      .expect(429);
+  });
+
+  it("anonymizes booking personal data while preserving operational records", async () => {
+    await createSlots(app, adminCookie, "2026-06-30", "13:00", "13:30");
+
+    const created = await request(app.getHttpServer())
+      .post("/book")
+      .send({
+        name: "Privacy Guest",
+        contact: "privacy@example.test",
+        date: "2026-06-30",
+        time: "13:00",
+        note: "Delete me"
+      })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post("/admin/bookings/anonymize")
+      .set("Cookie", adminCookie)
+      .type("form")
+      .send({ booking_id: created.body.booking.id })
+      .expect(302);
+
+    const bookings = await request(app.getHttpServer())
+      .get("/api/bookings")
+      .set("Cookie", adminCookie)
+      .expect(200);
+
+    expect(bookings.body[0]).toMatchObject({
+      id: created.body.booking.id,
+      name: "삭제된 고객",
+      contact: "deleted",
+      note: null
+    });
+  });
+
+  it("serves launch readiness pages for health, policies, and refund terms", async () => {
+    await request(app.getHttpServer())
+      .get("/healthz")
+      .expect(200)
+      .expect((response) => {
+        expect(response.body).toMatchObject({ ok: true, service: "minical" });
+      });
+
+    for (const path of ["/terms", "/privacy", "/refund"]) {
+      await request(app.getHttpServer())
+        .get(path)
+        .expect(200)
+        .expect((response) => {
+          expect(response.text).toContain("MiniCal");
+        });
+    }
+  });
+
   it("creates a store signup with its own public and owner admin routes", async () => {
     await request(app.getHttpServer())
       .post("/signup")
@@ -448,6 +559,12 @@ describe("MiniCal bookings", () => {
       .send({ slug: "matjib", name: "맛집", password: "owner-secret" })
       .expect(302)
       .expect("Location", "/matjib/admin");
+
+    const db = new BetterSqlite3(path.join(tempRoot, "data", "minical.sqlite3"));
+    const stored = db.prepare("SELECT admin_password FROM stores WHERE slug = ?").get("matjib");
+    db.close();
+    expect(stored.admin_password).not.toBe("owner-secret");
+    expect(stored.admin_password).toMatch(/^scrypt\$/);
 
     const ownerLogin = await request(app.getHttpServer())
       .post("/matjib/admin/login")
@@ -643,6 +760,39 @@ describe("MiniCal bookings", () => {
     expect(dashboard.text).toContain("가게별 예약 및 슬롯");
     expect(dashboard.text).toContain("18:00");
     expect(dashboard.text).toContain("예약됨");
+  });
+
+  it("fails closed in production when the platform admin password is missing", () => {
+    const originalAdminPassword = process.env.ADMIN_PASSWORD;
+    const originalNodeEnv = process.env.NODE_ENV;
+    delete process.env.ADMIN_PASSWORD;
+    process.env.NODE_ENV = "production";
+
+    expect(() => adminPassword()).toThrow("ADMIN_PASSWORD is required in production");
+
+    if (originalAdminPassword === undefined) {
+      delete process.env.ADMIN_PASSWORD;
+    } else {
+      process.env.ADMIN_PASSWORD = originalAdminPassword;
+    }
+    if (originalNodeEnv === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = originalNodeEnv;
+    }
+  });
+
+  it("fails startup when TLS verification is disabled", () => {
+    const original = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+    process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+
+    expect(() => assertSafeEnvironment()).toThrow("NODE_TLS_REJECT_UNAUTHORIZED=0 is not allowed");
+
+    if (original === undefined) {
+      delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+    } else {
+      process.env.NODE_TLS_REJECT_UNAUTHORIZED = original;
+    }
   });
 });
 

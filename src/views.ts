@@ -280,6 +280,49 @@ export function renderSignupPage(error?: string) {
   );
 }
 
+export function renderLegalPage(kind: "terms" | "privacy" | "refund") {
+  const content = {
+    terms: {
+      title: "서비스 이용약관",
+      body: [
+        "MiniCal은 가게 예약 접수와 관리자용 예약 관리를 제공하는 서비스입니다.",
+        "사용자는 허위 예약, 타인 정보 무단 입력, 서비스 장애를 유발하는 자동화 사용을 해서는 안 됩니다.",
+        "유료 기능을 도입하는 경우 요금, 구독 기간, 해지 조건은 결제 화면과 환불 정책에 함께 표시되어야 합니다."
+      ]
+    },
+    privacy: {
+      title: "개인정보처리방침",
+      body: [
+        "MiniCal은 예약 처리에 필요한 이름, 연락처, 예약 일시, 메모를 저장합니다.",
+        "관리자는 고객의 삭제 요청을 받으면 예약 개인정보를 익명화해야 합니다.",
+        "운영 로그에는 고객 이름과 연락처를 저장하지 않으며, 백업과 로그는 접근 권한이 있는 운영자만 다뤄야 합니다."
+      ]
+    },
+    refund: {
+      title: "환불 정책",
+      body: [
+        "유료 구독을 제공하기 전까지 MiniCal은 결제를 처리하지 않습니다.",
+        "결제 기능을 켜는 경우 환불 가능 기간, 부분 환불 기준, 처리 기한을 결제 전에 명확히 고지해야 합니다.",
+        "중복 결제, 장애로 인한 미사용, 법정 청약철회 요청은 운영자가 우선 검토해야 합니다."
+      ]
+    }
+  }[kind];
+
+  return page(
+    `MiniCal ${content.title}`,
+    `<main class="shell legal-shell">
+      <section class="intro">
+        <p class="eyebrow">MiniCal Policy</p>
+        <h1>${content.title}</h1>
+        <p class="lede">출시 전 운영 기준을 사용자에게 명확히 보여주기 위한 기본 문서입니다. 실제 유료 서비스 공개 전 법무 검토가 필요합니다.</p>
+      </section>
+      <section class="booking-panel legal-panel">
+        ${content.body.map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`).join("")}
+      </section>
+    </main>`
+  );
+}
+
 export function renderAdminLoginPage(error?: string, action = "/admin/login", returnPath = "/") {
   return page(
     "MiniCal 관리자 로그인",
@@ -326,6 +369,10 @@ export function renderAdminPage(store: Store, bookings: Booking[], slots: Availa
               ${statuses.map((status) => `<option value="${status}" ${status === booking.status ? "selected" : ""}>${status}</option>`).join("")}
             </select>
             <button type="submit">변경</button>
+          </form>
+          <form method="post" action="${escapeHtml(basePath)}/admin/bookings/anonymize" class="privacy-form">
+            <input type="hidden" name="booking_id" value="${booking.id}">
+            <button type="submit">개인정보 삭제</button>
           </form>
         </td>
       </tr>`
@@ -608,6 +655,9 @@ function renderGlobalNav(nav: NavOptions) {
     <div class="nav-actions">
       <a href="/stores">가게 목록</a>
       <a href="/signup">가게 입점</a>
+      <a href="/terms">약관</a>
+      <a href="/privacy">개인정보</a>
+      <a href="/refund">환불</a>
       ${storeAdminHref ? `<a href="${escapeHtml(storeAdminHref)}">가게 관리자</a>` : ""}
       <a href="/admin">전체 관리자</a>
       ${

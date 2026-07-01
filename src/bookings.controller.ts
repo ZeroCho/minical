@@ -1,4 +1,18 @@
-import { BadRequestException, Body, Controller, Get, HttpCode, Param, Post, Req, Res, UnauthorizedException } from "@nestjs/common";
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  ForbiddenException,
+  Get,
+  HttpCode,
+  HttpException,
+  HttpStatus,
+  Param,
+  Post,
+  Req,
+  Res,
+  UnauthorizedException
+} from "@nestjs/common";
 import { Request, Response } from "express";
 import {
   adminPassword,
@@ -7,13 +21,15 @@ import {
   isAdminAuthenticated,
   isStoreAdminAuthenticated,
   setAdminCookie,
-  setStoreAdminCookie
+  setStoreAdminCookie,
+  verifyPassword
 } from "./admin-auth";
 import { BookingsService, DEFAULT_STORE_SLUG } from "./bookings.service";
 import {
   renderAdminLoginPage,
   renderAdminPage,
   renderLandingPage,
+  renderLegalPage,
   renderPlatformAdminPage,
   renderPublicPage,
   renderStoreListPage,
@@ -23,6 +39,26 @@ import {
 @Controller()
 export class BookingsController {
   constructor(private readonly bookings: BookingsService) {}
+
+  @Get("/healthz")
+  healthz() {
+    return this.bookings.health();
+  }
+
+  @Get("/terms")
+  terms(@Res() response: Response) {
+    response.type("html").send(renderLegalPage("terms"));
+  }
+
+  @Get("/privacy")
+  privacy(@Res() response: Response) {
+    response.type("html").send(renderLegalPage("privacy"));
+  }
+
+  @Get("/refund")
+  refund(@Res() response: Response) {
+    response.type("html").send(renderLegalPage("refund"));
+  }
 
   @Get("/")
   publicPage(@Res() response: Response) {
@@ -89,7 +125,9 @@ export class BookingsController {
 
   @Post("/admin/login")
   login(@Body() body: Record<string, string>, @Req() request: Request, @Res() response: Response) {
+    requireLoginRateLimit(request, "platform");
     if (String(body.password ?? "") !== adminPassword()) {
+      recordFailedLogin(request, "platform");
       if (wantsJson(request)) {
         throw new UnauthorizedException("invalid admin password");
       }
@@ -97,12 +135,14 @@ export class BookingsController {
       return;
     }
 
+    clearFailedLogins(request, "platform");
     setAdminCookie(response);
     response.redirect(302, "/admin");
   }
 
   @Post("/admin/logout")
-  logout(@Res() response: Response) {
+  logout(@Req() request: Request, @Res() response: Response) {
+    requireSameOrigin(request);
     clearAdminCookie(response);
     response.redirect(302, "/admin");
   }
@@ -110,6 +150,7 @@ export class BookingsController {
   @Post("/admin/status")
   @HttpCode(200)
   updateStatus(@Body() body: Record<string, string>, @Req() request: Request, @Res() response: Response) {
+    requireSameOrigin(request);
     requireAdmin(request);
     const booking = this.bookings.updateStatus(body.booking_id, body.status, DEFAULT_STORE_SLUG);
     if (wantsJson(request)) {
@@ -122,6 +163,7 @@ export class BookingsController {
 
   @Post("/admin/availability")
   createAvailability(@Body() body: Record<string, string>, @Req() request: Request, @Res() response: Response) {
+    requireSameOrigin(request);
     requireAdmin(request);
     const slots = this.bookings.createAvailability(body, DEFAULT_STORE_SLUG);
     if (wantsJson(request)) {
@@ -134,6 +176,7 @@ export class BookingsController {
 
   @Post("/admin/availability/toggle")
   toggleAvailability(@Body() body: Record<string, string>, @Req() request: Request, @Res() response: Response) {
+    requireSameOrigin(request);
     requireAdmin(request);
     const slot = this.bookings.toggleAvailability(body.slot_id, body.is_active, DEFAULT_STORE_SLUG);
     if (wantsJson(request)) {
@@ -146,6 +189,7 @@ export class BookingsController {
 
   @Post("/admin/availability/copy")
   copyAvailability(@Body() body: Record<string, string>, @Req() request: Request, @Res() response: Response) {
+    requireSameOrigin(request);
     requireAdmin(request);
     const slots = this.bookings.copyAvailability(body.source_date, body.target_date, DEFAULT_STORE_SLUG);
     if (wantsJson(request)) {
@@ -156,8 +200,22 @@ export class BookingsController {
     response.redirect(302, `/admin?date=${encodeURIComponent(body.target_date ?? "")}`);
   }
 
+  @Post("/admin/bookings/anonymize")
+  anonymizeBooking(@Body() body: Record<string, string>, @Req() request: Request, @Res() response: Response) {
+    requireSameOrigin(request);
+    requireAdmin(request);
+    const booking = this.bookings.anonymizeBooking(body.booking_id, DEFAULT_STORE_SLUG);
+    if (wantsJson(request)) {
+      response.json({ ok: true, booking });
+      return;
+    }
+
+    response.redirect(302, "/admin");
+  }
+
   @Get("/api/bookings")
-  apiBookings() {
+  apiBookings(@Req() request: Request) {
+    requireAdmin(request);
     return this.bookings.all(DEFAULT_STORE_SLUG);
   }
 
@@ -237,7 +295,9 @@ export class BookingsController {
     @Res() response: Response
   ) {
     const store = this.bookings.storeBySlug(storeSlug);
-    if (String(body.password ?? "") !== store.admin_password) {
+    requireLoginRateLimit(request, `store:${store.slug}`);
+    if (!verifyPassword(String(body.password ?? ""), store.admin_password)) {
+      recordFailedLogin(request, `store:${store.slug}`);
       if (wantsJson(request)) {
         throw new UnauthorizedException("invalid store admin password");
       }
@@ -245,12 +305,14 @@ export class BookingsController {
       return;
     }
 
+    clearFailedLogins(request, `store:${store.slug}`);
     setStoreAdminCookie(response, store.slug, store.admin_password);
     response.redirect(302, `/${store.slug}/admin`);
   }
 
   @Post("/:storeSlug/admin/logout")
-  storeLogout(@Param("storeSlug") storeSlug: string, @Res() response: Response) {
+  storeLogout(@Param("storeSlug") storeSlug: string, @Req() request: Request, @Res() response: Response) {
+    requireSameOrigin(request);
     const store = this.bookings.storeBySlug(storeSlug);
     clearStoreAdminCookie(response, store.slug);
     response.redirect(302, `/${store.slug}/admin`);
@@ -264,6 +326,7 @@ export class BookingsController {
     @Req() request: Request,
     @Res() response: Response
   ) {
+    requireSameOrigin(request);
     const store = requireStoreAdmin(this.bookings, storeSlug, request);
     const booking = this.bookings.updateStatus(body.booking_id, body.status, store.slug);
     if (wantsJson(request)) {
@@ -281,6 +344,7 @@ export class BookingsController {
     @Req() request: Request,
     @Res() response: Response
   ) {
+    requireSameOrigin(request);
     const store = requireStoreAdmin(this.bookings, storeSlug, request);
     const slots = this.bookings.createAvailability(body, store.slug);
     if (wantsJson(request)) {
@@ -298,6 +362,7 @@ export class BookingsController {
     @Req() request: Request,
     @Res() response: Response
   ) {
+    requireSameOrigin(request);
     const store = requireStoreAdmin(this.bookings, storeSlug, request);
     const slot = this.bookings.toggleAvailability(body.slot_id, body.is_active, store.slug);
     if (wantsJson(request)) {
@@ -315,6 +380,7 @@ export class BookingsController {
     @Req() request: Request,
     @Res() response: Response
   ) {
+    requireSameOrigin(request);
     const store = requireStoreAdmin(this.bookings, storeSlug, request);
     const slots = this.bookings.copyAvailability(body.source_date, body.target_date, store.slug);
     if (wantsJson(request)) {
@@ -323,6 +389,24 @@ export class BookingsController {
     }
 
     response.redirect(302, `/${store.slug}/admin?date=${encodeURIComponent(body.target_date ?? "")}`);
+  }
+
+  @Post("/:storeSlug/admin/bookings/anonymize")
+  anonymizeStoreBooking(
+    @Param("storeSlug") storeSlug: string,
+    @Body() body: Record<string, string>,
+    @Req() request: Request,
+    @Res() response: Response
+  ) {
+    requireSameOrigin(request);
+    const store = requireStoreAdmin(this.bookings, storeSlug, request);
+    const booking = this.bookings.anonymizeBooking(body.booking_id, store.slug);
+    if (wantsJson(request)) {
+      response.json({ ok: true, booking });
+      return;
+    }
+
+    response.redirect(302, `/${store.slug}/admin`);
   }
 
   @Get("/:storeSlug/api/bookings")
@@ -372,6 +456,76 @@ function requireStoreAdmin(bookings: BookingsService, storeSlug: string, request
     throw new UnauthorizedException("store admin password required");
   }
   return store;
+}
+
+const loginAttempts = new Map<string, { count: number; firstAttemptAt: number }>();
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const MAX_FAILED_LOGINS = 5;
+
+function requireSameOrigin(request: Request) {
+  const origin = request.headers.origin;
+  const referer = request.headers.referer;
+  const candidate = typeof origin === "string" ? origin : typeof referer === "string" ? referer : undefined;
+  if (!candidate) {
+    return;
+  }
+
+  const requestHost = request.headers.host;
+  if (!requestHost) {
+    throw new ForbiddenException("missing host header");
+  }
+
+  try {
+    const candidateUrl = new URL(candidate);
+    if (candidateUrl.host !== requestHost) {
+      throw new ForbiddenException("cross-site admin request blocked");
+    }
+  } catch (error) {
+    if (error instanceof ForbiddenException) {
+      throw error;
+    }
+    throw new ForbiddenException("invalid origin header");
+  }
+}
+
+function requireLoginRateLimit(request: Request, scope: string) {
+  const key = loginRateLimitKey(request, scope);
+  const attempts = loginAttempts.get(key);
+  if (!attempts) {
+    return;
+  }
+  if (Date.now() - attempts.firstAttemptAt > LOGIN_WINDOW_MS) {
+    loginAttempts.delete(key);
+    return;
+  }
+  if (attempts.count >= MAX_FAILED_LOGINS) {
+    throw new HttpException("too many failed login attempts", HttpStatus.TOO_MANY_REQUESTS);
+  }
+}
+
+function recordFailedLogin(request: Request, scope: string) {
+  const key = loginRateLimitKey(request, scope);
+  const now = Date.now();
+  const attempts = loginAttempts.get(key);
+  if (!attempts || now - attempts.firstAttemptAt > LOGIN_WINDOW_MS) {
+    loginAttempts.set(key, { count: 1, firstAttemptAt: now });
+    return;
+  }
+
+  attempts.count += 1;
+}
+
+function clearFailedLogins(request: Request, scope: string) {
+  loginAttempts.delete(loginRateLimitKey(request, scope));
+}
+
+function loginRateLimitKey(request: Request, scope: string) {
+  const forwardedFor = request.headers["x-forwarded-for"];
+  const ip =
+    typeof forwardedFor === "string"
+      ? forwardedFor.split(",")[0].trim()
+      : request.ip ?? request.socket.remoteAddress ?? "unknown";
+  return `${process.env.MINICAL_DATA_DIR ?? "default"}:${scope}:${ip}`;
 }
 
 function wantsJson(request: Request) {
